@@ -21,8 +21,9 @@ type BackMsg struct{}
 
 // MergeMsg requests merging the current PR.
 type MergeMsg struct {
-	Number int
-	Method string
+	Number  int
+	Method  string
+	Undraft bool
 }
 
 // Model is the file list screen model.
@@ -140,10 +141,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			case "enter", "y":
 				number := m.pr.Number
 				method := m.mergeMethods()[m.mergeMethod]
+				undraft := m.pr.IsDraft
 				m.confirmMerge = false
 				m.merging = true
 				return m, func() tea.Msg {
-					return MergeMsg{Number: number, Method: method}
+					return MergeMsg{Number: number, Method: method, Undraft: undraft}
 				}
 			case "esc", "n", "q":
 				m.confirmMerge = false
@@ -268,7 +270,11 @@ func (m Model) View() string {
 		b.WriteString("\n")
 	} else if m.confirmMerge {
 		b.WriteString("\n")
-		b.WriteString(styles.Unread.Render(fmt.Sprintf("  Merge #%d? ", m.pr.Number)))
+		action := "Merge"
+		if m.pr.IsDraft {
+			action = "Undraft & Merge"
+		}
+		b.WriteString(styles.Unread.Render(fmt.Sprintf("  %s #%d? ", action, m.pr.Number)))
 		for i, method := range m.mergeMethods() {
 			if i == m.mergeMethod {
 				b.WriteString(styles.Selected.Render(fmt.Sprintf(" [%s] ", method)))

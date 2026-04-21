@@ -28,8 +28,15 @@ type OpenBrowserMsg struct {
 
 // MergeMsg requests merging a PR.
 type MergeMsg struct {
-	Number int
-	Method string // "merge", "squash", "rebase"
+	Number  int
+	Method  string // "merge", "squash", "rebase"
+	Undraft bool   // undraft before merge
+}
+
+// ToggleDraftMsg requests toggling draft status.
+type ToggleDraftMsg struct {
+	Number  int
+	IsDraft bool
 }
 
 // Model is the PR list screen model.
@@ -136,10 +143,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				if len(m.prs) > 0 {
 					pr := m.prs[m.cursor]
 					method := m.mergeMethods()[m.mergeMethod]
+					undraft := pr.IsDraft
 					m.confirmMerge = false
 					m.merging = true
 					return m, func() tea.Msg {
-						return MergeMsg{Number: pr.Number, Method: method}
+						return MergeMsg{Number: pr.Number, Method: method, Undraft: undraft}
 					}
 				}
 			case "esc", "n", "q":
@@ -192,6 +200,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		case "R":
 			m.loading = true
 			return m, func() tea.Msg { return RefreshMsg{} }
+		case "d":
+			if len(m.prs) > 0 {
+				pr := m.prs[m.cursor]
+				return m, func() tea.Msg {
+					return ToggleDraftMsg{Number: pr.Number, IsDraft: pr.IsDraft}
+				}
+			}
 		case "o":
 			if len(m.prs) > 0 {
 				pr := m.prs[m.cursor]
@@ -263,7 +278,11 @@ func (m Model) View() string {
 	} else if m.confirmMerge && len(m.prs) > 0 {
 		pr := m.prs[m.cursor]
 		b.WriteString("\n")
-		b.WriteString(styles.Unread.Render(fmt.Sprintf("  Merge #%d? ", pr.Number)))
+		action := "Merge"
+		if pr.IsDraft {
+			action = "Undraft & Merge"
+		}
+		b.WriteString(styles.Unread.Render(fmt.Sprintf("  %s #%d? ", action, pr.Number)))
 		for i, method := range m.mergeMethods() {
 			if i == m.mergeMethod {
 				b.WriteString(styles.Selected.Render(fmt.Sprintf(" [%s] ", method)))
@@ -277,7 +296,7 @@ func (m Model) View() string {
 
 	// Status bar
 	b.WriteString("\n")
-	help := styles.Help.Render("  j/k:navigate  C-d/C-u:half-page  enter:open  m:merge  r:read/unread  R:refresh  o:browser  q:quit")
+	help := styles.Help.Render("  j/k:navigate  C-d/C-u:half-page  enter:open  m:merge  d:draft  r:read/unread  R:refresh  o:browser  q:quit")
 	b.WriteString(help)
 
 	return b.String()

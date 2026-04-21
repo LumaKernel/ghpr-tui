@@ -121,10 +121,33 @@ func (c *Client) GetMergeSettings() (MergeSettings, error) {
 	}, nil
 }
 
+// MarkReady marks a draft PR as ready for review.
+func (c *Client) MarkReady(number int) error {
+	_, err := c.run("pr", "ready", fmt.Sprintf("%d", number))
+	return err
+}
+
 // MergePR merges a PR. method is one of "merge", "squash", "rebase".
-func (c *Client) MergePR(number int, method string) error {
+// If undraft is true, marks the PR as ready for review first.
+func (c *Client) MergePR(number int, method string, undraft bool) error {
+	if undraft {
+		if err := c.MarkReady(number); err != nil {
+			return fmt.Errorf("undraft: %w", err)
+		}
+	}
 	args := []string{"pr", "merge", fmt.Sprintf("%d", number), "--" + method, "--delete-branch"}
 	_, err := c.run(args...)
+	return err
+}
+
+// ToggleDraft toggles the draft status of a PR.
+func (c *Client) ToggleDraft(number int, isDraft bool) error {
+	if isDraft {
+		// Currently draft → mark ready
+		return c.MarkReady(number)
+	}
+	// Currently ready → convert to draft
+	_, err := c.run("pr", "ready", fmt.Sprintf("%d", number), "--undo")
 	return err
 }
 

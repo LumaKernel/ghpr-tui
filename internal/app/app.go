@@ -43,6 +43,10 @@ type mergeResultMsg struct {
 	err    error
 }
 
+type draftToggledMsg struct {
+	err error
+}
+
 type mergeSettingsMsg struct {
 	methods []string
 }
@@ -156,6 +160,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case browserOpenedMsg:
 		return m, nil
 
+	case draftToggledMsg:
+		if msg.err != nil {
+			m.prList = m.prList.SetMergeResult(styles.Removed.Render(fmt.Sprintf("Draft toggle failed: %v", msg.err)))
+		}
+		// Refresh to reflect new draft state
+		return m, m.loadPRs()
+
 	case mergeResultMsg:
 		resultMsg := ""
 		if msg.err != nil {
@@ -213,9 +224,19 @@ func (m Model) updatePRList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		client := m.client
 		number := mergeMsg.Number
 		method := mergeMsg.Method
+		undraft := mergeMsg.Undraft
 		return m, func() tea.Msg {
-			err := client.MergePR(number, method)
+			err := client.MergePR(number, method, undraft)
 			return mergeResultMsg{number: number, err: err}
+		}
+	case prlist.ToggleDraftMsg:
+		toggleMsg := msg.(prlist.ToggleDraftMsg)
+		client := m.client
+		number := toggleMsg.Number
+		isDraft := toggleMsg.IsDraft
+		return m, func() tea.Msg {
+			err := client.ToggleDraft(number, isDraft)
+			return draftToggledMsg{err: err}
 		}
 	}
 
@@ -248,8 +269,9 @@ func (m Model) updateFileList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		client := m.client
 		number := mergeMsg.Number
 		method := mergeMsg.Method
+		undraft := mergeMsg.Undraft
 		return m, func() tea.Msg {
-			err := client.MergePR(number, method)
+			err := client.MergePR(number, method, undraft)
 			return mergeResultMsg{number: number, err: err}
 		}
 	}
