@@ -98,10 +98,10 @@ func (m Model) loadPRs() tea.Cmd {
 	}
 }
 
-func (m Model) loadDiff(number int) tea.Cmd {
+func (m Model) loadDiff(pr ghclient.PR) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
-		diff, err := client.GetParsedDiff(number)
+		diff, err := client.GetParsedDiff(pr)
 		return diffLoadedMsg{diff: diff, err: err}
 	}
 }
@@ -207,7 +207,7 @@ func (m Model) updatePRList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		selectMsg := msg.(prlist.SelectMsg)
 		m.screen = ScreenFileList
 		m.fileList = m.fileList.SetPR(selectMsg.PR)
-		return m, m.loadDiff(selectMsg.PR.Number)
+		return m, m.loadDiff(selectMsg.PR)
 	case prlist.RefreshMsg:
 		m.prList = m.prList.SetLoading(true)
 		return m, m.loadPRs()

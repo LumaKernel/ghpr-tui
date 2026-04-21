@@ -55,13 +55,45 @@ func (c *Client) ListPRs(limit int) ([]PR, error) {
 }
 
 // GetDiff returns the raw diff for a PR.
-func (c *Client) GetDiff(number int) (string, error) {
-	return c.run("pr", "diff", fmt.Sprintf("%d", number))
+// Falls back to local git diff if gh pr diff fails (e.g. diff too large).
+func (c *Client) GetDiff(pr PR) (string, error) {
+	raw, err := c.run("pr", "diff", fmt.Sprintf("%d", pr.Number))
+	if err == nil {
+		return raw, nil
+	}
+
+	// Fallback: fetch remote refs and use local git diff
+	return c.getLocalDiff(pr)
+}
+
+func (c *Client) getLocalDiff(pr PR) (string, error) {
+	remote := "origin"
+
+	// Fetch both branches
+	fetchCmd := exec.Command("git", "fetch", remote,
+		fmt.Sprintf("+refs/heads/%s:refs/remotes/%s/%s", pr.HeadRef, remote, pr.HeadRef),
+		fmt.Sprintf("+refs/heads/%s:refs/remotes/%s/%s", pr.BaseRef, remote, pr.BaseRef),
+	)
+	if out, err := fetchCmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("git fetch: %s", string(out))
+	}
+
+	// Three-dot diff: changes on head since it diverged from base
+	diffCmd := exec.Command("git", "diff",
+		fmt.Sprintf("%s/%s...%s/%s", remote, pr.BaseRef, remote, pr.HeadRef))
+	out, err := diffCmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return "", fmt.Errorf("git diff: %s", string(exitErr.Stderr))
+		}
+		return "", fmt.Errorf("git diff: %w", err)
+	}
+	return string(out), nil
 }
 
 // GetParsedDiff returns a parsed diff for a PR.
-func (c *Client) GetParsedDiff(number int) (ParsedDiff, error) {
-	raw, err := c.GetDiff(number)
+func (c *Client) GetParsedDiff(pr PR) (ParsedDiff, error) {
+	raw, err := c.GetDiff(pr)
 	if err != nil {
 		return ParsedDiff{}, err
 	}
