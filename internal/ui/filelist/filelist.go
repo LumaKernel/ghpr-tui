@@ -25,23 +25,22 @@ type MergeMsg struct {
 	Method string
 }
 
-var mergeMethods = []string{"squash", "merge", "rebase"}
-
 // Model is the file list screen model.
 type Model struct {
-	pr           ghclient.PR
-	diff         ghclient.ParsedDiff
-	cursor       int
-	width        int
-	height       int
-	repo         string
-	store        *state.Store
-	loading      bool
-	err          error
-	confirmMerge bool
-	mergeMethod  int
-	merging      bool
-	mergeResult  string
+	pr             ghclient.PR
+	diff           ghclient.ParsedDiff
+	cursor         int
+	width          int
+	height         int
+	repo           string
+	store          *state.Store
+	loading        bool
+	err            error
+	confirmMerge   bool
+	mergeMethod    int
+	merging        bool
+	mergeResult    string
+	allowedMethods []string
 }
 
 // New creates a new file list model.
@@ -65,6 +64,19 @@ func (m Model) SetDiff(diff ghclient.ParsedDiff) Model {
 	m.diff = diff
 	m.loading = false
 	return m
+}
+
+// SetAllowedMergeMethods sets the allowed merge methods from repo settings.
+func (m Model) SetAllowedMergeMethods(methods []string) Model {
+	m.allowedMethods = methods
+	return m
+}
+
+func (m Model) mergeMethods() []string {
+	if len(m.allowedMethods) > 0 {
+		return m.allowedMethods
+	}
+	return []string{"squash", "merge", "rebase"}
 }
 
 // SetMergeResult sets the merge result message.
@@ -122,12 +134,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if m.confirmMerge {
 			switch msg.String() {
 			case "h", "left":
-				m.mergeMethod = (m.mergeMethod + len(mergeMethods) - 1) % len(mergeMethods)
+				m.mergeMethod = (m.mergeMethod + len(m.mergeMethods()) - 1) % len(m.mergeMethods())
 			case "l", "right":
-				m.mergeMethod = (m.mergeMethod + 1) % len(mergeMethods)
+				m.mergeMethod = (m.mergeMethod + 1) % len(m.mergeMethods())
 			case "enter", "y":
 				number := m.pr.Number
-				method := mergeMethods[m.mergeMethod]
+				method := m.mergeMethods()[m.mergeMethod]
 				m.confirmMerge = false
 				m.merging = true
 				return m, func() tea.Msg {
@@ -257,7 +269,7 @@ func (m Model) View() string {
 	} else if m.confirmMerge {
 		b.WriteString("\n")
 		b.WriteString(styles.Unread.Render(fmt.Sprintf("  Merge #%d? ", m.pr.Number)))
-		for i, method := range mergeMethods {
+		for i, method := range m.mergeMethods() {
 			if i == m.mergeMethod {
 				b.WriteString(styles.Selected.Render(fmt.Sprintf(" [%s] ", method)))
 			} else {

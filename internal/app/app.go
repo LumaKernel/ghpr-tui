@@ -43,6 +43,10 @@ type mergeResultMsg struct {
 	err    error
 }
 
+type mergeSettingsMsg struct {
+	methods []string
+}
+
 // Model is the top-level app model.
 type Model struct {
 	screen   Screen
@@ -69,9 +73,17 @@ func New(repo string, client *ghclient.Client, store *state.Store) Model {
 	}
 }
 
-// Init starts the app by loading PRs.
+// Init starts the app by loading PRs and merge settings concurrently.
 func (m Model) Init() tea.Cmd {
-	return m.loadPRs()
+	return tea.Batch(m.loadPRs(), m.loadMergeSettings())
+}
+
+func (m Model) loadMergeSettings() tea.Cmd {
+	client := m.client
+	return func() tea.Msg {
+		settings, _ := client.GetMergeSettings()
+		return mergeSettingsMsg{methods: settings.AllowedMethods()}
+	}
 }
 
 func (m Model) loadPRs() tea.Cmd {
@@ -134,6 +146,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.fileList = m.fileList.SetDiff(msg.diff)
 		}
+		return m, nil
+
+	case mergeSettingsMsg:
+		m.prList = m.prList.SetAllowedMergeMethods(msg.methods)
+		m.fileList = m.fileList.SetAllowedMergeMethods(msg.methods)
 		return m, nil
 
 	case browserOpenedMsg:

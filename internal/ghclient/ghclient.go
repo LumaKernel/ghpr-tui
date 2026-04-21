@@ -68,6 +68,59 @@ func (c *Client) GetParsedDiff(number int) (ParsedDiff, error) {
 	return ParseDiff(raw), nil
 }
 
+// MergeSettings represents which merge methods a repo allows.
+type MergeSettings struct {
+	AllowSquash bool
+	AllowMerge  bool
+	AllowRebase bool
+}
+
+// AllowedMethods returns the list of allowed merge method names.
+func (ms MergeSettings) AllowedMethods() []string {
+	var methods []string
+	if ms.AllowSquash {
+		methods = append(methods, "squash")
+	}
+	if ms.AllowMerge {
+		methods = append(methods, "merge")
+	}
+	if ms.AllowRebase {
+		methods = append(methods, "rebase")
+	}
+	return methods
+}
+
+// GetMergeSettings returns the repo's allowed merge methods.
+func (c *Client) GetMergeSettings() (MergeSettings, error) {
+	repo := c.repo
+	if repo == "" {
+		var err error
+		repo, err = ResolveRepo()
+		if err != nil {
+			return MergeSettings{}, err
+		}
+	}
+	out, err := exec.Command("gh", "api", fmt.Sprintf("repos/%s", repo),
+		"--jq", "{squash: .allow_squash_merge, merge: .allow_merge_commit, rebase: .allow_rebase_merge}").Output()
+	if err != nil {
+		// Fallback: allow all
+		return MergeSettings{AllowSquash: true, AllowMerge: true, AllowRebase: true}, nil
+	}
+	var raw struct {
+		Squash bool `json:"squash"`
+		Merge  bool `json:"merge"`
+		Rebase bool `json:"rebase"`
+	}
+	if err := json.Unmarshal(out, &raw); err != nil {
+		return MergeSettings{AllowSquash: true, AllowMerge: true, AllowRebase: true}, nil
+	}
+	return MergeSettings{
+		AllowSquash: raw.Squash,
+		AllowMerge:  raw.Merge,
+		AllowRebase: raw.Rebase,
+	}, nil
+}
+
 // MergePR merges a PR. method is one of "merge", "squash", "rebase".
 func (c *Client) MergePR(number int, method string) error {
 	args := []string{"pr", "merge", fmt.Sprintf("%d", number), "--" + method, "--delete-branch"}

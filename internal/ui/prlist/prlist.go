@@ -42,13 +42,12 @@ type Model struct {
 	store        *state.Store
 	loading      bool
 	err          error
-	confirmMerge bool   // showing merge confirmation
-	mergeMethod  int    // 0=squash, 1=merge, 2=rebase
-	merging      bool   // merge in progress
-	mergeResult  string // result message
+	confirmMerge   bool     // showing merge confirmation
+	mergeMethod    int      // index into allowedMethods
+	merging        bool     // merge in progress
+	mergeResult    string   // result message
+	allowedMethods []string // from repo settings
 }
-
-var mergeMethods = []string{"squash", "merge", "rebase"}
 
 // New creates a new PR list model.
 func New(repo string, store *state.Store) Model {
@@ -97,6 +96,19 @@ func (m Model) visibleHeight() int {
 	return h
 }
 
+// SetAllowedMergeMethods sets the allowed merge methods from repo settings.
+func (m Model) SetAllowedMergeMethods(methods []string) Model {
+	m.allowedMethods = methods
+	return m
+}
+
+func (m Model) mergeMethods() []string {
+	if len(m.allowedMethods) > 0 {
+		return m.allowedMethods
+	}
+	return []string{"squash", "merge", "rebase"}
+}
+
 // SetMergeResult sets the merge result message.
 func (m Model) SetMergeResult(msg string) Model {
 	m.mergeResult = msg
@@ -117,13 +129,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if m.confirmMerge {
 			switch msg.String() {
 			case "h", "left":
-				m.mergeMethod = (m.mergeMethod + len(mergeMethods) - 1) % len(mergeMethods)
+				m.mergeMethod = (m.mergeMethod + len(m.mergeMethods()) - 1) % len(m.mergeMethods())
 			case "l", "right":
-				m.mergeMethod = (m.mergeMethod + 1) % len(mergeMethods)
+				m.mergeMethod = (m.mergeMethod + 1) % len(m.mergeMethods())
 			case "enter", "y":
 				if len(m.prs) > 0 {
 					pr := m.prs[m.cursor]
-					method := mergeMethods[m.mergeMethod]
+					method := m.mergeMethods()[m.mergeMethod]
 					m.confirmMerge = false
 					m.merging = true
 					return m, func() tea.Msg {
@@ -252,7 +264,7 @@ func (m Model) View() string {
 		pr := m.prs[m.cursor]
 		b.WriteString("\n")
 		b.WriteString(styles.Unread.Render(fmt.Sprintf("  Merge #%d? ", pr.Number)))
-		for i, method := range mergeMethods {
+		for i, method := range m.mergeMethods() {
 			if i == m.mergeMethod {
 				b.WriteString(styles.Selected.Render(fmt.Sprintf(" [%s] ", method)))
 			} else {
