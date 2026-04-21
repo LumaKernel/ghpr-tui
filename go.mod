@@ -1,4 +1,4 @@
-module github.com/LumaKernel/ghprq
+module github.com/LumaKernel/ghpr-tui
 
 go 1.26.2
 

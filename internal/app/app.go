@@ -5,13 +5,13 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/LumaKernel/ghprq/internal/ghclient"
-	"github.com/LumaKernel/ghprq/internal/state"
-	"github.com/LumaKernel/ghprq/internal/ui/checks"
-	"github.com/LumaKernel/ghprq/internal/ui/diffview"
-	"github.com/LumaKernel/ghprq/internal/ui/filelist"
-	"github.com/LumaKernel/ghprq/internal/ui/prlist"
-	"github.com/LumaKernel/ghprq/internal/ui/styles"
+	"github.com/LumaKernel/ghpr-tui/internal/ghclient"
+	"github.com/LumaKernel/ghpr-tui/internal/state"
+	"github.com/LumaKernel/ghpr-tui/internal/ui/checks"
+	"github.com/LumaKernel/ghpr-tui/internal/ui/diffview"
+	"github.com/LumaKernel/ghpr-tui/internal/ui/filelist"
+	"github.com/LumaKernel/ghpr-tui/internal/ui/prlist"
+	"github.com/LumaKernel/ghpr-tui/internal/ui/styles"
 )
 
 // Screen represents the current active screen.

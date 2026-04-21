@@ -6,9 +6,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/LumaKernel/ghprq/internal/app"
-	"github.com/LumaKernel/ghprq/internal/ghclient"
-	"github.com/LumaKernel/ghprq/internal/state"
+	"github.com/LumaKernel/ghpr-tui/internal/app"
+	"github.com/LumaKernel/ghpr-tui/internal/ghclient"
+	"github.com/LumaKernel/ghpr-tui/internal/state"
 )
 
 func main() {

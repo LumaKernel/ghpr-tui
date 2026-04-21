@@ -8,8 +8,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/LumaKernel/ghprq/internal/ghclient"
-	"github.com/LumaKernel/ghprq/internal/ui/styles"
+	"github.com/LumaKernel/ghpr-tui/internal/ghclient"
+	"github.com/LumaKernel/ghpr-tui/internal/ui/styles"
 )
 
 // BackMsg requests going back.

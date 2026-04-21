@@ -8,10 +8,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/LumaKernel/ghprq/internal/ghclient"
-	"github.com/LumaKernel/ghprq/internal/state"
-	"github.com/LumaKernel/ghprq/internal/ui/checks"
-	"github.com/LumaKernel/ghprq/internal/ui/styles"
+	"github.com/LumaKernel/ghpr-tui/internal/ghclient"
+	"github.com/LumaKernel/ghpr-tui/internal/state"
+	"github.com/LumaKernel/ghpr-tui/internal/ui/checks"
+	"github.com/LumaKernel/ghpr-tui/internal/ui/styles"
 )
 
 // SelectMsg is sent when a PR is selected.
@@ -233,7 +233,7 @@ func (m Model) View() string {
 	var b strings.Builder
 
 	// Header
-	header := styles.Title.Render(fmt.Sprintf(" ghprq — %s ", m.repo))
+	header := styles.Title.Render(fmt.Sprintf(" ghpr-tui — %s", m.repo))
 	b.WriteString(header)
 	b.WriteString("\n")
 

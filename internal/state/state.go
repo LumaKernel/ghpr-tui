@@ -36,7 +36,7 @@ func NewStore() (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("config dir: %w", err)
 	}
-	dir := filepath.Join(configDir, "ghprq")
+	dir := filepath.Join(configDir, "ghpr-tui")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("creating state dir: %w", err)
 	}
