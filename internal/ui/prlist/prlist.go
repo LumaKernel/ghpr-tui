@@ -10,6 +10,7 @@ import (
 
 	"github.com/LumaKernel/ghprq/internal/ghclient"
 	"github.com/LumaKernel/ghprq/internal/state"
+	"github.com/LumaKernel/ghprq/internal/ui/checks"
 	"github.com/LumaKernel/ghprq/internal/ui/styles"
 )
 
@@ -31,6 +32,11 @@ type MergeMsg struct {
 	Number  int
 	Method  string // "merge", "squash", "rebase"
 	Undraft bool   // undraft before merge
+}
+
+// OpenChecksMsg requests opening the checks screen.
+type OpenChecksMsg struct {
+	PR ghclient.PR
 }
 
 // ToggleDraftMsg requests toggling draft status.
@@ -200,6 +206,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		case "R":
 			m.loading = true
 			return m, func() tea.Msg { return RefreshMsg{} }
+		case "c":
+			if len(m.prs) > 0 {
+				pr := m.prs[m.cursor]
+				return m, func() tea.Msg { return OpenChecksMsg{PR: pr} }
+			}
 		case "d":
 			if len(m.prs) > 0 {
 				pr := m.prs[m.cursor]
@@ -296,7 +307,7 @@ func (m Model) View() string {
 
 	// Status bar
 	b.WriteString("\n")
-	help := styles.Help.Render("  j/k:navigate  C-d/C-u:half-page  enter:open  m:merge  d:draft  r:read/unread  R:refresh  o:browser  q:quit")
+	help := styles.Help.Render("  j/k:navigate  enter:open  c:checks  m:merge  d:draft  r:read  R:refresh  o:browser  q:quit")
 	b.WriteString(help)
 
 	return b.String()
@@ -314,8 +325,11 @@ func (m Model) renderPR(pr ghclient.PR, selected bool) string {
 	// PR number
 	num := styles.PRNumber.Render(fmt.Sprintf("#%-4d", pr.Number))
 
+	// Check status icon
+	checkIcon := checks.CheckIcon(pr.CheckSummary)
+
 	// Title (truncate if needed)
-	titleWidth := m.width - 45
+	titleWidth := m.width - 48
 	if titleWidth < 20 {
 		titleWidth = 20
 	}
@@ -345,8 +359,8 @@ func (m Model) renderPR(pr ghclient.PR, selected bool) string {
 	// Time
 	timeStr := styles.Subtitle.Render(relativeTime(pr.UpdatedAt))
 
-	line := fmt.Sprintf("%s%s %s%s  %s  %s  %s",
-		indicator, num, title, draftTag, stats, author, timeStr)
+	line := fmt.Sprintf("%s%s %s %s%s  %s  %s  %s",
+		indicator, num, checkIcon, title, draftTag, stats, author, timeStr)
 
 	if selected {
 		// Apply selection highlight across the full width

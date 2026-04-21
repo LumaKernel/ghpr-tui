@@ -7,6 +7,7 @@ import (
 
 	"github.com/LumaKernel/ghprq/internal/ghclient"
 	"github.com/LumaKernel/ghprq/internal/state"
+	"github.com/LumaKernel/ghprq/internal/ui/checks"
 	"github.com/LumaKernel/ghprq/internal/ui/diffview"
 	"github.com/LumaKernel/ghprq/internal/ui/filelist"
 	"github.com/LumaKernel/ghprq/internal/ui/prlist"
@@ -20,6 +21,7 @@ const (
 	ScreenPRList Screen = iota
 	ScreenFileList
 	ScreenDiffView
+	ScreenChecks
 	screenSentinel // exhaustive check guard
 )
 
@@ -32,6 +34,11 @@ type prsLoadedMsg struct {
 type diffLoadedMsg struct {
 	diff ghclient.ParsedDiff
 	err  error
+}
+
+type checksLoadedMsg struct {
+	checks []ghclient.Check
+	err    error
 }
 
 type browserOpenedMsg struct {
@@ -53,15 +60,17 @@ type mergeSettingsMsg struct {
 
 // Model is the top-level app model.
 type Model struct {
-	screen   Screen
-	client   *ghclient.Client
-	repo     string
-	store    *state.Store
-	prList   prlist.Model
-	fileList filelist.Model
-	diffView diffview.Model
-	width    int
-	height   int
+	screen     Screen
+	prevScreen Screen // for back navigation from checks
+	client     *ghclient.Client
+	repo       string
+	store      *state.Store
+	prList     prlist.Model
+	fileList   filelist.Model
+	diffView   diffview.Model
+	checks     checks.Model
+	width      int
+	height     int
 }
 
 // New creates a new app model.
@@ -74,6 +83,7 @@ func New(repo string, client *ghclient.Client, store *state.Store) Model {
 		prList:   prlist.New(repo, store),
 		fileList: filelist.New(repo, store),
 		diffView: diffview.New(repo, store),
+		checks:   checks.New(),
 	}
 }
 
@@ -106,6 +116,14 @@ func (m Model) loadDiff(pr ghclient.PR) tea.Cmd {
 	}
 }
 
+func (m Model) loadChecks(number int) tea.Cmd {
+	client := m.client
+	return func() tea.Msg {
+		chks, err := client.GetChecks(number)
+		return checksLoadedMsg{checks: chks, err: err}
+	}
+}
+
 // Update is the main update loop.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -115,6 +133,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.prList = m.prList.SetSize(msg.Width, msg.Height)
 		m.fileList = m.fileList.SetSize(msg.Width, msg.Height)
 		m.diffView = m.diffView.SetSize(msg.Width, msg.Height)
+		m.checks = m.checks.SetSize(msg.Width, msg.Height)
 		return m, nil
 
 	case tea.KeyMsg:
@@ -123,13 +142,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.screen == ScreenPRList {
 				return m, tea.Quit
 			}
-			// q goes back in sub-screens
 			switch m.screen {
 			case ScreenDiffView:
 				m.screen = ScreenFileList
 				return m, nil
 			case ScreenFileList:
 				m.screen = ScreenPRList
+				return m, nil
+			case ScreenChecks:
+				m.screen = m.prevScreen
 				return m, nil
 			default:
 				return m, tea.Quit
@@ -152,6 +173,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case checksLoadedMsg:
+		if msg.err != nil {
+			m.checks = m.checks.SetError(msg.err)
+		} else {
+			m.checks = m.checks.SetChecks(msg.checks)
+		}
+		return m, nil
+
 	case mergeSettingsMsg:
 		m.prList = m.prList.SetAllowedMergeMethods(msg.methods)
 		m.fileList = m.fileList.SetAllowedMergeMethods(msg.methods)
@@ -164,7 +193,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.prList = m.prList.SetMergeResult(styles.Removed.Render(fmt.Sprintf("Draft toggle failed: %v", msg.err)))
 		}
-		// Refresh to reflect new draft state
 		return m, m.loadPRs()
 
 	case mergeResultMsg:
@@ -177,7 +205,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.prList = m.prList.SetMergeResult(resultMsg)
 		m.fileList = m.fileList.SetMergeResult(resultMsg)
 		if msg.err == nil {
-			// Go back to PR list and refresh
 			m.screen = ScreenPRList
 			return m, m.loadPRs()
 		}
@@ -192,6 +219,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateFileList(msg)
 	case ScreenDiffView:
 		return m.updateDiffView(msg)
+	case ScreenChecks:
+		return m.updateChecks(msg)
 	default:
 		panic(fmt.Sprintf("unhandled screen: %d", m.screen))
 	}
@@ -201,7 +230,6 @@ func (m Model) updatePRList(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.prList, cmd = m.prList.Update(msg)
 
-	// Handle messages from PR list
 	switch msg.(type) {
 	case prlist.SelectMsg:
 		selectMsg := msg.(prlist.SelectMsg)
@@ -238,6 +266,12 @@ func (m Model) updatePRList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			err := client.ToggleDraft(number, isDraft)
 			return draftToggledMsg{err: err}
 		}
+	case prlist.OpenChecksMsg:
+		checksMsg := msg.(prlist.OpenChecksMsg)
+		m.screen = ScreenChecks
+		m.prevScreen = ScreenPRList
+		m.checks = m.checks.SetPR(checksMsg.PR)
+		return m, m.loadChecks(checksMsg.PR.Number)
 	}
 
 	return m, cmd
@@ -274,6 +308,12 @@ func (m Model) updateFileList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			err := client.MergePR(number, method, undraft)
 			return mergeResultMsg{number: number, err: err}
 		}
+	case filelist.OpenChecksMsg:
+		checksMsg := msg.(filelist.OpenChecksMsg)
+		m.screen = ScreenChecks
+		m.prevScreen = ScreenFileList
+		m.checks = m.checks.SetPR(checksMsg.PR)
+		return m, m.loadChecks(checksMsg.PR.Number)
 	}
 
 	return m, cmd
@@ -320,6 +360,29 @@ func (m Model) updateDiffView(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m Model) updateChecks(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	m.checks, cmd = m.checks.Update(msg)
+
+	switch msg.(type) {
+	case checks.BackMsg:
+		m.screen = m.prevScreen
+		return m, nil
+	case checks.OpenBrowserMsg:
+		openMsg := msg.(checks.OpenBrowserMsg)
+		url := openMsg.URL
+		return m, func() tea.Msg {
+			_ = ghclient.OpenURL(url)
+			return browserOpenedMsg{}
+		}
+	case checks.RefreshMsg:
+		refreshMsg := msg.(checks.RefreshMsg)
+		return m, m.loadChecks(refreshMsg.Number)
+	}
+
+	return m, cmd
+}
+
 // View renders the current screen.
 func (m Model) View() string {
 	switch m.screen {
@@ -329,6 +392,8 @@ func (m Model) View() string {
 		return m.fileList.View()
 	case ScreenDiffView:
 		return m.diffView.View()
+	case ScreenChecks:
+		return m.checks.View()
 	default:
 		panic(fmt.Sprintf("unhandled screen: %d", m.screen))
 	}

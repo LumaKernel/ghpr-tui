@@ -38,7 +38,7 @@ func (c *Client) run(args ...string) (string, error) {
 
 // ListPRs returns open pull requests.
 func (c *Client) ListPRs(limit int) ([]PR, error) {
-	fields := "number,title,author,state,isDraft,additions,deletions,updatedAt,url,headRefName,baseRefName,labels"
+	fields := "number,title,author,state,isDraft,additions,deletions,updatedAt,url,headRefName,baseRefName,labels,statusCheckRollup"
 	out, err := c.run("pr", "list", "--state", "open", "--limit", fmt.Sprintf("%d", limit), "--json", fields)
 	if err != nil {
 		return nil, err
@@ -98,6 +98,25 @@ func (c *Client) GetParsedDiff(pr PR) (ParsedDiff, error) {
 		return ParsedDiff{}, err
 	}
 	return ParseDiff(raw), nil
+}
+
+// GetChecks returns the full check details for a PR.
+func (c *Client) GetChecks(number int) ([]Check, error) {
+	fields := "bucket,completedAt,description,event,link,name,startedAt,state,workflow"
+	out, err := c.run("pr", "checks", fmt.Sprintf("%d", number), "--json", fields)
+	if err != nil {
+		return nil, err
+	}
+	var checks []Check
+	if err := json.Unmarshal([]byte(out), &checks); err != nil {
+		return nil, fmt.Errorf("parsing checks: %w", err)
+	}
+	return checks, nil
+}
+
+// OpenURL opens a URL in the default browser.
+func OpenURL(url string) error {
+	return exec.Command("open", url).Start()
 }
 
 // MergeSettings represents which merge methods a repo allows.

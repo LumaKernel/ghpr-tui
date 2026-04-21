@@ -8,6 +8,7 @@ import (
 
 	"github.com/LumaKernel/ghprq/internal/ghclient"
 	"github.com/LumaKernel/ghprq/internal/state"
+	"github.com/LumaKernel/ghprq/internal/ui/checks"
 	"github.com/LumaKernel/ghprq/internal/ui/styles"
 )
 
@@ -18,6 +19,11 @@ type SelectFileMsg struct {
 
 // BackMsg requests going back to PR list.
 type BackMsg struct{}
+
+// OpenChecksMsg requests opening the checks screen.
+type OpenChecksMsg struct {
+	PR ghclient.PR
+}
 
 // MergeMsg requests merging the current PR.
 type MergeMsg struct {
@@ -194,6 +200,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 			m.store.MarkAllReviewed(m.repo, m.pr.Number, paths)
 			_ = m.store.Save()
+		case "c":
+			pr := m.pr
+			return m, func() tea.Msg { return OpenChecksMsg{PR: pr} }
 		case "m":
 			if !m.merging {
 				m.confirmMerge = true
@@ -218,6 +227,13 @@ func (m Model) View() string {
 	authorLine := fmt.Sprintf("  %s → %s  by %s",
 		m.pr.HeadRef, m.pr.BaseRef, m.pr.Author)
 	b.WriteString(styles.Subtitle.Render(authorLine))
+	b.WriteString("\n")
+
+	// Check summary
+	checkLine := checks.CheckSummaryLine(m.pr.CheckSummary)
+	if checkLine != "" {
+		b.WriteString(checkLine)
+	}
 	b.WriteString("\n")
 
 	if m.loading {
@@ -288,7 +304,7 @@ func (m Model) View() string {
 
 	// Help
 	b.WriteString("\n")
-	help := styles.Help.Render("  j/k:navigate  C-d/C-u:half-page  enter:diff  space:reviewed  m:merge  a:all  esc:back")
+	help := styles.Help.Render("  j/k:navigate  enter:diff  space:reviewed  c:checks  m:merge  a:all  esc:back")
 	b.WriteString(help)
 
 	return b.String()
