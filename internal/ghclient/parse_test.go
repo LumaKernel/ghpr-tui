@@ -223,6 +223,105 @@ index 1234567..abcdef0 100644
 	}
 }
 
+func TestParseDiff_ModeChange(t *testing.T) {
+	raw := `diff --git a/script.sh b/script.sh
+old mode 100644
+new mode 100755
+index 1234567..abcdef0
+--- a/script.sh
++++ b/script.sh
+@@ -1 +1,2 @@
+ #!/bin/bash
++echo hello`
+	diff := ParseDiff(raw)
+	if len(diff.Files) != 1 {
+		t.Fatalf("expected 1 file, got %d", len(diff.Files))
+	}
+	f := diff.Files[0]
+	if f.OldPath != "script.sh" {
+		t.Errorf("OldPath = %q, want %q", f.OldPath, "script.sh")
+	}
+	if f.Additions() != 1 {
+		t.Errorf("Additions = %d, want 1", f.Additions())
+	}
+}
+
+func TestParseDiff_UnknownMetadata(t *testing.T) {
+	// Lines that don't match any known prefix should be skipped via default
+	raw := `diff --git a/f.go b/f.go
+some unknown metadata line
+index 1234567..abcdef0
+--- a/f.go
++++ b/f.go
+@@ -1 +1,2 @@
+ existing
++added`
+	diff := ParseDiff(raw)
+	if len(diff.Files) != 1 {
+		t.Fatalf("expected 1 file, got %d", len(diff.Files))
+	}
+	if diff.Files[0].Additions() != 1 {
+		t.Errorf("Additions = %d, want 1", diff.Files[0].Additions())
+	}
+}
+
+func TestParseDiff_NoPathInDiffLine(t *testing.T) {
+	// Malformed diff line without a/ b/ prefixes
+	raw := `diff --git foo bar
+--- foo
++++ bar
+@@ -1 +1 @@
+-old
++new`
+	diff := ParseDiff(raw)
+	if len(diff.Files) != 1 {
+		t.Fatalf("expected 1 file, got %d", len(diff.Files))
+	}
+}
+
+func TestParseHunkHeader_Malformed(t *testing.T) {
+	// Empty/malformed header should return defaults (1, 1)
+	tests := []struct {
+		header  string
+		wantOld int
+		wantNew int
+	}{
+		{"", 1, 1},
+		{"garbage", 1, 1},
+		{"@@ @@", 1, 1},
+		{"@@ -abc +def @@", 1, 1}, // non-numeric
+	}
+	for _, tt := range tests {
+		old, new := parseHunkHeader(tt.header)
+		if old != tt.wantOld || new != tt.wantNew {
+			t.Errorf("parseHunkHeader(%q) = (%d, %d), want (%d, %d)",
+				tt.header, old, new, tt.wantOld, tt.wantNew)
+		}
+	}
+}
+
+func TestParseHunkHeader_EmptyParts(t *testing.T) {
+	// After stripping "@@ ", splitting on " @@" returns empty for just "@@"
+	old, new := parseHunkHeader("@@")
+	if old != 1 || new != 1 {
+		t.Errorf("parseHunkHeader(%q) = (%d, %d), want (1, 1)", "@@", old, new)
+	}
+}
+
+func TestParseDiff_FileWithNoHunks(t *testing.T) {
+	// File diff that ends without any @@ hunk headers (e.g. binary without explicit Binary line)
+	raw := `diff --git a/f.bin b/f.bin
+index 1234567..abcdef0 100644
+`
+	diff := ParseDiff(raw)
+	if len(diff.Files) != 1 {
+		t.Fatalf("expected 1 file, got %d", len(diff.Files))
+	}
+	if len(diff.Files[0].Hunks) != 0 {
+		t.Errorf("expected 0 hunks, got %d", len(diff.Files[0].Hunks))
+	}
+}
+
 func TestParseDiff_EmptyInput(t *testing.T) {
 	diff := ParseDiff("")
 	if len(diff.Files) != 0 {
@@ -256,6 +355,37 @@ index 1234567..abcdef0 100644
 	}
 	if f.Deletions() != 1 {
 		t.Errorf("Deletions = %d, want 1", f.Deletions())
+	}
+}
+
+func TestParseDiff_FileWithNoHunksFollowedByAnotherFile(t *testing.T) {
+	// Tests the "diff --git" case inside metadata parsing (line 79-81)
+	// where a file has no hunks and is immediately followed by another diff
+	raw := `diff --git a/f.bin b/f.bin
+index 1234567..abcdef0 100644
+diff --git a/g.go b/g.go
+index 1234567..abcdef0 100644
+--- a/g.go
++++ b/g.go
+@@ -1,1 +1,2 @@
+ line1
++added
+`
+	diff := ParseDiff(raw)
+	if len(diff.Files) != 2 {
+		t.Fatalf("expected 2 files, got %d", len(diff.Files))
+	}
+	if diff.Files[0].NewPath != "f.bin" {
+		t.Errorf("first file = %q, want %q", diff.Files[0].NewPath, "f.bin")
+	}
+	if len(diff.Files[0].Hunks) != 0 {
+		t.Errorf("first file should have 0 hunks, got %d", len(diff.Files[0].Hunks))
+	}
+	if diff.Files[1].NewPath != "g.go" {
+		t.Errorf("second file = %q, want %q", diff.Files[1].NewPath, "g.go")
+	}
+	if len(diff.Files[1].Hunks) != 1 {
+		t.Errorf("second file should have 1 hunk, got %d", len(diff.Files[1].Hunks))
 	}
 }
 

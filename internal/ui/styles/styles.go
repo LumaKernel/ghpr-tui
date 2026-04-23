@@ -80,4 +80,24 @@ var (
 	PRNumber = lipgloss.NewStyle().
 			Foreground(Blue).
 			Bold(true)
+
+	VisualSelect = lipgloss.NewStyle().
+			Background(lipgloss.Color("#2d1b69"))
+
+	CommentMarker = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#a78bfa")).
+			Italic(true)
+
+	CommentBody = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#9ca3af")).
+			Background(lipgloss.Color("#1c1c2e"))
+
+	CommentAuthor = lipgloss.NewStyle().
+			Foreground(Cyan).
+			Bold(true)
+
+	CommentInput = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(Blue).
+			Padding(0, 1)
 )

@@ -8,6 +8,7 @@ import (
 	"github.com/LumaKernel/ghpr-tui/internal/ghclient"
 	"github.com/LumaKernel/ghpr-tui/internal/state"
 	"github.com/LumaKernel/ghpr-tui/internal/ui/checks"
+	"github.com/LumaKernel/ghpr-tui/internal/ui/comments"
 	"github.com/LumaKernel/ghpr-tui/internal/ui/diffview"
 	"github.com/LumaKernel/ghpr-tui/internal/ui/filelist"
 	"github.com/LumaKernel/ghpr-tui/internal/ui/prlist"
@@ -22,6 +23,7 @@ const (
 	ScreenFileList
 	ScreenDiffView
 	ScreenChecks
+	ScreenComments
 	screenSentinel // exhaustive check guard
 )
 
@@ -58,10 +60,30 @@ type mergeSettingsMsg struct {
 	methods []string
 }
 
+type commentsLoadedMsg struct {
+	comments []ghclient.ReviewComment
+	err      error
+}
+
+type headSHALoadedMsg struct {
+	sha string
+	err error
+}
+
+type commentPostedMsg struct {
+	number int
+	err    error
+}
+
+type replyPostedMsg struct {
+	number int
+	err    error
+}
+
 // Model is the top-level app model.
 type Model struct {
 	screen     Screen
-	prevScreen Screen // for back navigation from checks
+	prevScreen Screen // for back navigation from checks/comments
 	client     *ghclient.Client
 	repo       string
 	store      *state.Store
@@ -69,8 +91,11 @@ type Model struct {
 	fileList   filelist.Model
 	diffView   diffview.Model
 	checks     checks.Model
+	comments   comments.Model
 	width      int
 	height     int
+	// Cached data for passing between screens
+	currentPRNumber int
 }
 
 // New creates a new app model.
@@ -84,6 +109,7 @@ func New(repo string, client *ghclient.Client, store *state.Store) Model {
 		fileList: filelist.New(repo, store),
 		diffView: diffview.New(repo, store),
 		checks:   checks.New(),
+		comments: comments.New(),
 	}
 }
 
@@ -124,6 +150,25 @@ func (m Model) loadChecks(number int) tea.Cmd {
 	}
 }
 
+func (m Model) loadComments(number int) tea.Cmd {
+	client := m.client
+	return func() tea.Msg {
+		cs, err := client.GetReviewComments(number)
+		return commentsLoadedMsg{comments: cs, err: err}
+	}
+}
+
+func (m Model) loadHeadSHA(number int) tea.Cmd {
+	client := m.client
+	return func() tea.Msg {
+		sha, err := client.GetPRHeadSHA(number)
+		if err != nil {
+			return headSHALoadedMsg{err: err}
+		}
+		return headSHALoadedMsg{sha: sha}
+	}
+}
+
 // Update is the main update loop.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -134,9 +179,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.fileList = m.fileList.SetSize(msg.Width, msg.Height)
 		m.diffView = m.diffView.SetSize(msg.Width, msg.Height)
 		m.checks = m.checks.SetSize(msg.Width, msg.Height)
+		m.comments = m.comments.SetSize(msg.Width, msg.Height)
 		return m, nil
 
 	case tea.KeyMsg:
+		// Don't intercept q/ctrl+c when diffview is in input mode
+		if m.screen == ScreenDiffView && m.diffView.IsInputMode() {
+			break // fall through to screen delegation
+		}
 		switch msg.String() {
 		case "q", "ctrl+c":
 			if m.screen == ScreenPRList {
@@ -150,6 +200,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.screen = ScreenPRList
 				return m, nil
 			case ScreenChecks:
+				m.screen = m.prevScreen
+				return m, nil
+			case ScreenComments:
 				m.screen = m.prevScreen
 				return m, nil
 			default:
@@ -178,6 +231,43 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.checks = m.checks.SetError(msg.err)
 		} else {
 			m.checks = m.checks.SetChecks(msg.checks)
+		}
+		return m, nil
+
+	case commentsLoadedMsg:
+		if msg.err != nil {
+			if m.screen == ScreenComments {
+				m.comments = m.comments.SetError(msg.err)
+			}
+		} else {
+			threads := ghclient.GroupCommentThreads(msg.comments)
+			m.comments = m.comments.SetComments(threads)
+			m.diffView = m.diffView.SetComments(threads)
+		}
+		return m, nil
+
+	case headSHALoadedMsg:
+		if msg.err == nil {
+			m.diffView = m.diffView.SetHeadSHA(msg.sha)
+		}
+		return m, nil
+
+	case commentPostedMsg:
+		if msg.err != nil {
+			m.diffView = m.diffView.SetStatusMsg(styles.Removed.Render(fmt.Sprintf("Comment failed: %v", msg.err)))
+		} else {
+			m.diffView = m.diffView.SetStatusMsg(styles.Reviewed.Render("Comment posted!"))
+			// Refresh comments
+			return m, m.loadComments(msg.number)
+		}
+		return m, nil
+
+	case replyPostedMsg:
+		if msg.err != nil {
+			m.comments = m.comments.SetError(msg.err)
+		} else {
+			// Refresh comments
+			return m, m.loadComments(msg.number)
 		}
 		return m, nil
 
@@ -221,6 +311,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateDiffView(msg)
 	case ScreenChecks:
 		return m.updateChecks(msg)
+	case ScreenComments:
+		return m.updateComments(msg)
 	default:
 		panic(fmt.Sprintf("unhandled screen: %d", m.screen))
 	}
@@ -235,7 +327,12 @@ func (m Model) updatePRList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		selectMsg := msg.(prlist.SelectMsg)
 		m.screen = ScreenFileList
 		m.fileList = m.fileList.SetPR(selectMsg.PR)
-		return m, m.loadDiff(selectMsg.PR)
+		m.currentPRNumber = selectMsg.PR.Number
+		return m, tea.Batch(
+			m.loadDiff(selectMsg.PR),
+			m.loadComments(selectMsg.PR.Number),
+			m.loadHeadSHA(selectMsg.PR.Number),
+		)
 	case prlist.RefreshMsg:
 		m.prList = m.prList.SetLoading(true)
 		return m, m.loadPRs()
@@ -355,6 +452,30 @@ func (m Model) updateDiffView(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.fileList.PR().Number,
 		)
 		return m, nil
+
+	case diffview.OpenCommentsMsg:
+		openMsg := msg.(diffview.OpenCommentsMsg)
+		m.screen = ScreenComments
+		m.prevScreen = ScreenDiffView
+		m.comments = m.comments.SetPR(m.fileList.PR())
+		return m, m.loadComments(openMsg.PRNumber)
+
+	case diffview.PostCommentMsg:
+		postMsg := msg.(diffview.PostCommentMsg)
+		client := m.client
+		dv := m.diffView
+		return m, func() tea.Msg {
+			err := client.CreateReviewComment(
+				postMsg.PRNumber,
+				postMsg.Body,
+				postMsg.Path,
+				dv.HeadSHA(),
+				postMsg.Line,
+				postMsg.StartLine,
+				postMsg.Side,
+			)
+			return commentPostedMsg{number: postMsg.PRNumber, err: err}
+		}
 	}
 
 	return m, cmd
@@ -370,14 +491,52 @@ func (m Model) updateChecks(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case checks.OpenBrowserMsg:
 		openMsg := msg.(checks.OpenBrowserMsg)
+		client := m.client
 		url := openMsg.URL
 		return m, func() tea.Msg {
-			_ = ghclient.OpenURL(url)
+			_ = client.OpenURL(url)
 			return browserOpenedMsg{}
 		}
 	case checks.RefreshMsg:
 		refreshMsg := msg.(checks.RefreshMsg)
 		return m, m.loadChecks(refreshMsg.Number)
+	}
+
+	return m, cmd
+}
+
+func (m Model) updateComments(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	m.comments, cmd = m.comments.Update(msg)
+
+	switch msg.(type) {
+	case comments.BackMsg:
+		m.screen = m.prevScreen
+		return m, nil
+	case comments.RefreshMsg:
+		refreshMsg := msg.(comments.RefreshMsg)
+		return m, m.loadComments(refreshMsg.Number)
+	case comments.JumpToFileMsg:
+		// Navigate back to diffview at the specified file
+		jumpMsg := msg.(comments.JumpToFileMsg)
+		diff := m.fileList.Diff()
+		for i, f := range diff.Files {
+			if f.FilePath() == jumpMsg.Path || f.NewPath == jumpMsg.Path || f.OldPath == jumpMsg.Path {
+				m.screen = ScreenDiffView
+				m.diffView = m.diffView.SetFile(f, i, len(diff.Files), m.fileList.PR().Number)
+				return m, nil
+			}
+		}
+		// File not found, just go back
+		m.screen = m.prevScreen
+		return m, nil
+	case comments.ReplyMsg:
+		replyMsg := msg.(comments.ReplyMsg)
+		client := m.client
+		return m, func() tea.Msg {
+			err := client.ReplyToComment(replyMsg.PRNumber, replyMsg.InReplyToID, replyMsg.Body)
+			return replyPostedMsg{number: replyMsg.PRNumber, err: err}
+		}
 	}
 
 	return m, cmd
@@ -394,6 +553,8 @@ func (m Model) View() string {
 		return m.diffView.View()
 	case ScreenChecks:
 		return m.checks.View()
+	case ScreenComments:
+		return m.comments.View()
 	default:
 		panic(fmt.Sprintf("unhandled screen: %d", m.screen))
 	}

@@ -30,7 +30,7 @@ type PRState struct {
 	LastSeenAt    time.Time       `json:"lastSeenAt"`
 }
 
-// NewStore creates or loads a state store.
+// NewStore creates or loads a state store from the default config directory.
 func NewStore() (*Store, error) {
 	configDir, err := os.UserConfigDir()
 	if err != nil {
@@ -40,22 +40,7 @@ func NewStore() (*Store, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("creating state dir: %w", err)
 	}
-	path := filepath.Join(dir, "state.json")
-
-	s := &Store{
-		path: path,
-		data: storeData{Repos: make(map[string]*RepoState)},
-	}
-
-	raw, err := os.ReadFile(path)
-	if err == nil {
-		_ = json.Unmarshal(raw, &s.data)
-	}
-	if s.data.Repos == nil {
-		s.data.Repos = make(map[string]*RepoState)
-	}
-
-	return s, nil
+	return NewWithPath(filepath.Join(dir, "state.json"))
 }
 
 func (s *Store) repoState(repo string) *RepoState {
@@ -138,11 +123,25 @@ func (s *Store) ReviewedFileCount(repo string, number int) int {
 	return count
 }
 
+// NewWithPath creates a store with a custom path (useful for testing).
+func NewWithPath(path string) (*Store, error) {
+	s := &Store{
+		path: path,
+		data: storeData{Repos: make(map[string]*RepoState)},
+	}
+	raw, err := os.ReadFile(path)
+	if err == nil {
+		_ = json.Unmarshal(raw, &s.data)
+	}
+	if s.data.Repos == nil {
+		s.data.Repos = make(map[string]*RepoState)
+	}
+	return s, nil
+}
+
 // Save persists the state to disk.
 func (s *Store) Save() error {
-	raw, err := json.MarshalIndent(s.data, "", "  ")
-	if err != nil {
-		return err
-	}
+	// json.MarshalIndent cannot fail for storeData (only strings, bools, ints, maps)
+	raw, _ := json.MarshalIndent(s.data, "", "  ")
 	return os.WriteFile(s.path, raw, 0o644)
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -39,47 +40,97 @@ Key bindings (diff view):
   esc         Back
 `
 
-func main() {
-	if len(os.Args) > 1 {
-		switch os.Args[1] {
+// parseAction represents the result of parsing CLI arguments.
+type parseAction int
+
+const (
+	actionRun     parseAction = iota // run the TUI
+	actionVersion                    // print version
+	actionHelp                       // print help
+)
+
+// parseArgs parses CLI arguments and returns the action and repo string.
+func parseArgs(args []string) (parseAction, string) {
+	if len(args) > 1 {
+		switch args[1] {
 		case "-v", "--version":
-			fmt.Printf("ghpr-tui %s\n", version.Version)
-			return
+			return actionVersion, ""
 		case "-h", "--help":
-			fmt.Print(helpText)
-			return
+			return actionHelp, ""
+		default:
+			return actionRun, args[1]
 		}
 	}
+	return actionRun, ""
+}
 
-	// Resolve repo from args or current directory
-	repo := ""
-	if len(os.Args) > 1 {
-		repo = os.Args[1]
-	}
+// printVersion writes the version string to the given writer.
+func printVersion(w io.Writer) {
+	fmt.Fprintf(w, "ghpr-tui %s\n", version.Version)
+}
 
-	if repo == "" {
-		var err error
-		repo, err = ghclient.ResolveRepo()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			fmt.Fprintf(os.Stderr, "Run from a git repo or pass owner/repo as argument.\n")
-			os.Exit(1)
-		}
+// printHelp writes the help text to the given writer.
+func printHelp(w io.Writer) {
+	fmt.Fprint(w, helpText)
+}
+
+// setup handles CLI args, resolves repo, and creates the app model.
+// Returns nil model if version/help was printed (no TUI needed).
+func setup(args []string, stdout, stderr io.Writer) (tea.Model, error) {
+	action, repo := parseArgs(args)
+
+	switch action {
+	case actionVersion:
+		printVersion(stdout)
+		return nil, nil
+	case actionHelp:
+		printHelp(stdout)
+		return nil, nil
+	case actionRun:
+		// continue
 	}
 
 	client := ghclient.NewClient(repo)
 
-	store, err := state.NewStore()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error initializing state: %v\n", err)
-		os.Exit(1)
+	if repo == "" {
+		var err error
+		repo, err = client.ResolveRepo()
+		if err != nil {
+			fmt.Fprintf(stderr, "Error: %v\n", err)
+			fmt.Fprintf(stderr, "Run from a git repo or pass owner/repo as argument.\n")
+			return nil, err
+		}
 	}
 
-	model := app.New(repo, client, store)
+	store, err := state.NewStore()
+	if err != nil {
+		fmt.Fprintf(stderr, "Error initializing state: %v\n", err)
+		return nil, err
+	}
+
+	return app.New(repo, client, store), nil
+}
+
+// run executes the main application logic and returns an error instead of calling os.Exit.
+func run(args []string, stdout, stderr io.Writer) error {
+	model, err := setup(args, stdout, stderr)
+	if err != nil {
+		return err
+	}
+	if model == nil {
+		return nil
+	}
 
 	p := tea.NewProgram(model, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		fmt.Fprintf(stderr, "Error: %v\n", err)
+		return err
+	}
+	return nil
+}
+
+func main() {
+	if err := run(os.Args, os.Stdout, os.Stderr); err != nil {
 		os.Exit(1)
 	}
 }

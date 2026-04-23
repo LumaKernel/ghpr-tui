@@ -190,6 +190,68 @@ func prFromJSON(p prJSON) PR {
 	}
 }
 
+// ReviewComment represents a single review comment on a PR.
+type ReviewComment struct {
+	ID              int       `json:"id"`
+	Body            string    `json:"body"`
+	Path            string    `json:"path"`
+	Line            int       `json:"line"`
+	StartLine       int       `json:"start_line"`
+	Side            string    `json:"side"`
+	StartSide       string    `json:"start_side"`
+	InReplyToID     int       `json:"in_reply_to_id"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+	User            struct {
+		Login string `json:"login"`
+	} `json:"user"`
+}
+
+// CommentThread groups a root comment and its replies.
+type CommentThread struct {
+	Root    ReviewComment
+	Replies []ReviewComment
+}
+
+// GroupCommentThreads groups comments into threads by InReplyToID.
+func GroupCommentThreads(comments []ReviewComment) []CommentThread {
+	rootMap := make(map[int]*CommentThread)
+	var roots []int
+
+	for _, c := range comments {
+		if c.InReplyToID == 0 {
+			ct := CommentThread{Root: c}
+			rootMap[c.ID] = &ct
+			roots = append(roots, c.ID)
+		}
+	}
+
+	for _, c := range comments {
+		if c.InReplyToID != 0 {
+			if ct, ok := rootMap[c.InReplyToID]; ok {
+				ct.Replies = append(ct.Replies, c)
+			}
+		}
+	}
+
+	threads := make([]CommentThread, 0, len(roots))
+	for _, id := range roots {
+		threads = append(threads, *rootMap[id])
+	}
+	return threads
+}
+
+// CommentsForFile returns comment threads for a specific file path.
+func CommentsForFile(threads []CommentThread, path string) []CommentThread {
+	var result []CommentThread
+	for _, t := range threads {
+		if t.Root.Path == path {
+			result = append(result, t)
+		}
+	}
+	return result
+}
+
 // LineType represents the type of a diff line.
 type LineType int
 

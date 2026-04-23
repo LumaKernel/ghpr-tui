@@ -128,6 +128,154 @@ func TestParseCheckBucket(t *testing.T) {
 	}
 }
 
+func TestCheckBucketType(t *testing.T) {
+	c := Check{Bucket: "fail"}
+	if c.BucketType() != CheckBucketFail {
+		t.Errorf("BucketType() = %d, want %d", c.BucketType(), CheckBucketFail)
+	}
+}
+
+func TestComputeCheckSummary_EdgeCases(t *testing.T) {
+	checks := []statusCheckJSON{
+		{Typename: "CheckRun", Conclusion: "TIMED_OUT"},
+		{Typename: "CheckRun", Conclusion: "ACTION_REQUIRED"},
+		{Typename: "StatusContext", State: "ERROR"},
+		{Typename: "StatusContext", State: "EXPECTED"},
+		{Typename: "StatusContext", State: "UNKNOWN_STATE"},
+		{Typename: "UnknownType"},
+	}
+	cs := computeCheckSummary(checks)
+	if cs.Total != 6 {
+		t.Errorf("Total = %d, want 6", cs.Total)
+	}
+	if cs.Fail != 3 { // TIMED_OUT + ACTION_REQUIRED + ERROR
+		t.Errorf("Fail = %d, want 3", cs.Fail)
+	}
+	if cs.Pending != 3 { // EXPECTED + UNKNOWN_STATE + UnknownType
+		t.Errorf("Pending = %d, want 3", cs.Pending)
+	}
+}
+
+func TestCheckDuration_NoStart(t *testing.T) {
+	c := Check{
+		CompletedAt: time.Date(2026, 1, 1, 10, 5, 0, 0, time.UTC),
+	}
+	if c.Duration() != 0 {
+		t.Error("Duration should be 0 when no start time")
+	}
+}
+
+func TestPrFromJSON_NoLabels(t *testing.T) {
+	p := prJSON{Number: 1, Title: "No labels"}
+	pr := prFromJSON(p)
+	if len(pr.Labels) != 0 {
+		t.Errorf("Labels = %v, want empty", pr.Labels)
+	}
+}
+
+func TestGroupCommentThreads(t *testing.T) {
+	t.Run("empty", func(t *testing.T) {
+		threads := GroupCommentThreads(nil)
+		if len(threads) != 0 {
+			t.Errorf("expected 0 threads, got %d", len(threads))
+		}
+	})
+
+	t.Run("single root no replies", func(t *testing.T) {
+		comments := []ReviewComment{
+			{ID: 1, Body: "root comment", Path: "main.go", Line: 10},
+		}
+		threads := GroupCommentThreads(comments)
+		if len(threads) != 1 {
+			t.Fatalf("expected 1 thread, got %d", len(threads))
+		}
+		if threads[0].Root.ID != 1 {
+			t.Errorf("root ID = %d, want 1", threads[0].Root.ID)
+		}
+		if len(threads[0].Replies) != 0 {
+			t.Errorf("expected 0 replies, got %d", len(threads[0].Replies))
+		}
+	})
+
+	t.Run("root with replies", func(t *testing.T) {
+		comments := []ReviewComment{
+			{ID: 1, Body: "root", Path: "main.go", Line: 10},
+			{ID: 2, Body: "reply 1", InReplyToID: 1},
+			{ID: 3, Body: "reply 2", InReplyToID: 1},
+		}
+		threads := GroupCommentThreads(comments)
+		if len(threads) != 1 {
+			t.Fatalf("expected 1 thread, got %d", len(threads))
+		}
+		if len(threads[0].Replies) != 2 {
+			t.Errorf("expected 2 replies, got %d", len(threads[0].Replies))
+		}
+	})
+
+	t.Run("multiple threads", func(t *testing.T) {
+		comments := []ReviewComment{
+			{ID: 10, Body: "root A", Path: "a.go", Line: 1},
+			{ID: 20, Body: "root B", Path: "b.go", Line: 5},
+			{ID: 30, Body: "reply to A", InReplyToID: 10},
+			{ID: 40, Body: "reply to B", InReplyToID: 20},
+		}
+		threads := GroupCommentThreads(comments)
+		if len(threads) != 2 {
+			t.Fatalf("expected 2 threads, got %d", len(threads))
+		}
+		// Threads should be in order of root IDs
+		if threads[0].Root.ID != 10 {
+			t.Errorf("first thread root ID = %d, want 10", threads[0].Root.ID)
+		}
+		if threads[1].Root.ID != 20 {
+			t.Errorf("second thread root ID = %d, want 20", threads[1].Root.ID)
+		}
+	})
+
+	t.Run("orphan reply ignored", func(t *testing.T) {
+		comments := []ReviewComment{
+			{ID: 1, Body: "root", Path: "main.go", Line: 10},
+			{ID: 2, Body: "orphan reply", InReplyToID: 999},
+		}
+		threads := GroupCommentThreads(comments)
+		if len(threads) != 1 {
+			t.Fatalf("expected 1 thread, got %d", len(threads))
+		}
+		if len(threads[0].Replies) != 0 {
+			t.Errorf("orphan reply should not be attached, got %d replies", len(threads[0].Replies))
+		}
+	})
+}
+
+func TestCommentsForFile(t *testing.T) {
+	threads := []CommentThread{
+		{Root: ReviewComment{Path: "main.go", Line: 1}},
+		{Root: ReviewComment{Path: "util.go", Line: 5}},
+		{Root: ReviewComment{Path: "main.go", Line: 10}},
+	}
+
+	t.Run("matching file", func(t *testing.T) {
+		result := CommentsForFile(threads, "main.go")
+		if len(result) != 2 {
+			t.Errorf("expected 2 threads for main.go, got %d", len(result))
+		}
+	})
+
+	t.Run("no match", func(t *testing.T) {
+		result := CommentsForFile(threads, "other.go")
+		if len(result) != 0 {
+			t.Errorf("expected 0 threads for other.go, got %d", len(result))
+		}
+	})
+
+	t.Run("empty threads", func(t *testing.T) {
+		result := CommentsForFile(nil, "main.go")
+		if len(result) != 0 {
+			t.Errorf("expected 0 threads for nil input, got %d", len(result))
+		}
+	})
+}
+
 func TestPrFromJSON(t *testing.T) {
 	p := prJSON{
 		Number:      42,

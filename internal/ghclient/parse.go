@@ -85,17 +85,12 @@ func parseFileDiff(lines []string, start int) (FileDiff, int) {
 	}
 
 parseHunks:
-	for i < len(lines) {
-		if strings.HasPrefix(lines[i], "diff --git") {
-			break
-		}
-		if strings.HasPrefix(lines[i], "@@") {
-			hunk, nextI := parseHunk(lines, i)
-			file.Hunks = append(file.Hunks, hunk)
-			i = nextI
-		} else {
-			i++
-		}
+	for i < len(lines) && !strings.HasPrefix(lines[i], "diff --git") {
+		// parseHunk consumes all lines until it hits @@ or diff --git or EOF,
+		// so lines[i] here is always @@ (or loop already exited).
+		hunk, nextI := parseHunk(lines, i)
+		file.Hunks = append(file.Hunks, hunk)
+		i = nextI
 	}
 
 	return file, i
@@ -146,9 +141,7 @@ func parseHunkHeader(header string) (oldStart, newStart int) {
 	// @@ -oldStart,oldCount +newStart,newCount @@ optional text
 	header = strings.TrimPrefix(header, "@@ ")
 	parts := strings.SplitN(header, " @@", 2)
-	if len(parts) == 0 {
-		return 1, 1
-	}
+	// SplitN always returns at least 1 element
 	ranges := strings.Fields(parts[0])
 	for _, r := range ranges {
 		if strings.HasPrefix(r, "-") {
